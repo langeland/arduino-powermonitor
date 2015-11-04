@@ -18,7 +18,7 @@ ADC_MODE(ADC_VCC);
 // the debounce time; increase if the output flickers
 const unsigned long interruptDebounceDelay = 500;
 
-// Time of last sensor interrupt
+// Time of last sensor interrupt (ms)
 volatile unsigned long interruptTimeLast = 0;
 
 // Time between the two latest interrupts (ms)
@@ -28,10 +28,10 @@ volatile unsigned int interruptTimeDelta = 0;
  ** Log timing
  ***********************************************************************************************/
 
-// Time between log calls
+// Time between log calls (ms)
 const unsigned long logTimeInterval = 10000;
 
-// Time of last log call
+// Time of last log call (ms)
 volatile unsigned long logTimeLast = 0;
 
 // Time between the two latest log calls (ms)
@@ -41,7 +41,7 @@ volatile unsigned int logTimeDelta = 0;
  **
  ***********************************************************************************************/
 
-//Number of pulses, used to measure energy.
+// Number of pulses, since last log call
 volatile unsigned int interruptCount = 0;   
 
 volatile unsigned int interruptCountTotal = 0;
@@ -98,7 +98,6 @@ void loop() {
 
 
 void logData(){
-	// digitalWrite(SENSOR_POWER_PIN, LOW);
 	noInterrupts();
 
 	logTimeDelta = millis() - logTimeLast;
@@ -107,10 +106,11 @@ void logData(){
 	 **
 	 ***********************************************************************************************/
 	// Calculate powerAverage over the last log interval
+	// This is not correct needs to take logTimeDelta in account
 	powerAverage = ((float)interruptCount / 3600) * 100000;
 	
 	
-	// TODO: Calculate powerCurrent
+	// Calculate powerCurrent based on the time between the last two interrupts (interruptTimeDelta)
 	if(interruptTimeDelta > 0) {
 		powerCurrent = (3600 / (float)interruptTimeDelta) / SENSOR_PPKWH;
 	}
@@ -136,38 +136,12 @@ void logData(){
 	Serial.println(powerCurrent);
 
 	
-	/*
-	// TODO: Calculate powerAverage
-	powerAverage = (interruptCount / 3600) * 100000;
-	
-	// TODO: Calculate powerCurrent
-	if(interruptDelta > 0){
-		powerCurrent = (3600 / interruptDelta) / SENSOR_PPKWH;
-	}
-
-	
-
-	Serial.println("#####################################################");
-	Serial.print("powerAverage: ");
-	Serial.println(powerAverage);
-	
-	
-	
-	Serial.print("      Counts: ");
-	Serial.println(interruptCount);
-	
-
-
-	*/
 	Serial.println();
 	
+	// Reset counter and timer
 	interruptCount = 0;
-
-
-
 	logTimeLast = millis();
 	interrupts();
-	// digitalWrite(SENSOR_POWER_PIN, HIGH);
 }
 
 
