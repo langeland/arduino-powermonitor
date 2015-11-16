@@ -10,7 +10,6 @@ ADC_MODE(ADC_VCC);
  ***********************************************************************************************/
 #define SENSOR_INPUT_PIN 15
 #define SENSOR_POWER_PIN 13
-#define SENSOR_PPKWH 1000
 
 /***********************************************************************************************
  ** Interrupt timing
@@ -29,7 +28,7 @@ volatile unsigned int interruptTimeDelta = 0;
  ***********************************************************************************************/
 
 // Time between log calls (ms)
-const unsigned long logTimeInterval = 10000;
+const unsigned long logTimeInterval = 60000;
 
 // Time of last log call (ms)
 volatile unsigned long logTimeLast = 0;
@@ -73,8 +72,30 @@ void setup() {
 	Serial.println("/***********************************************************************************************");
 	Serial.println(" ** PowerMonitor v5.0.1");
 	Serial.println(" ***********************************************************************************************/");
+
+	// We start by connecting to a WiFi network
+	Serial.println();
+	Serial.println();
+	Serial.print("Connecting to ");
+	Serial.println(ssid);
+
+	WiFi.begin(ssid, password);
+
+	while (WiFi.status() != WL_CONNECTED) {
+		Serial.print(".");
+		delay(500);
+	}
+
+	delay(1000);
+
 	Serial.println("");
-	
+	Serial.println("WiFi connected");
+	Serial.print("IP address: ");
+	Serial.println(WiFi.localIP());
+	Serial.println();
+	Serial.println();
+
+	// Start sensor
 	pinMode(SENSOR_POWER_PIN, OUTPUT);
 	digitalWrite(SENSOR_POWER_PIN, HIGH);
 
@@ -99,7 +120,6 @@ void loop() {
 
 void logData(){
 	noInterrupts();
-
 	logTimeDelta = millis() - logTimeLast;
 
 	/***********************************************************************************************
@@ -107,38 +127,93 @@ void logData(){
 	 ***********************************************************************************************/
 	// Calculate powerAverage over the last log interval
 	// This is not correct needs to take logTimeDelta in account
-	powerAverage = ((float)interruptCount / 3600) * 100000;
-	
-	
+	if(logTimeDelta > 0) {
+		powerAverage = ((float)interruptCount * 3600000) / logTimeDelta;
+	}
+
 	// Calculate powerCurrent based on the time between the last two interrupts (interruptTimeDelta)
 	if(interruptTimeDelta > 0) {
-		powerCurrent = (3600 / (float)interruptTimeDelta) / SENSOR_PPKWH;
+		powerCurrent = 3600000 / (float)interruptTimeDelta;
 	}
-	
-
 
 	/***********************************************************************************************
 	 **
 	 ***********************************************************************************************/
-	Serial.print("logData @ ");
+	Serial.print("Starting data logging @ ");
 	Serial.println(millis());
 
 	Serial.print(" -- interruptCount:");
 	Serial.println(interruptCount);
+
+	Serial.print(" -- interruptCountTotal:");
+	Serial.println(interruptCountTotal);
 
 	Serial.print(" -- logTimeDelta:");
 	Serial.println(logTimeDelta);
 
 	Serial.print(" -- powerAverage:");
 	Serial.println(powerAverage);
-	Serial.println();
-	Serial.print(" -- powerCurrent:");
-	Serial.println(powerCurrent);
 
-	
+	Serial.print(" -- powerCurrent:");
+	Serial.println(powerCurrent);	
+
+	/***********************************************************************************************
+	 **
+	 ***********************************************************************************************/
+	Serial.print(" -- connecting to: ");
+	Serial.println(host);
+
+	// Use WiFiClient class to create TCP connections
+	WiFiClient client;
+	const int httpPort = 8080;
+	if (!client.connect(host, httpPort)) {
+		Serial.println(" -- connection failed");
+		return;
+	}
+
+	// We now create a URI for the request
+	String PostData = "data={";
+	PostData += "  \"node\": {";
+	PostData += "    \"identifier\": " + String(ESP.getChipId()) + ",";
+	PostData += "    \"data\": {";
+	PostData += "      \"interruptCount\": " + String(interruptCount) + ",";
+	PostData += "      \"interruptCountTotal\": " + String(interruptCountTotal) + ",";
+	PostData += "      \"logTimeDelta\": " + String(logTimeDelta) + ",";
+	PostData += "      \"powerAverage\": " + String(powerAverage) + ",";
+	PostData += "      \"powerCurrent\": " + String(powerCurrent) + ",";
+	PostData += "      \"uptime\": " + String(millis()/1000) + ",";
+	PostData += "      \"freeHeap\": " + String(ESP.getFreeHeap()) + ",";
+	PostData += "      \"vcc\": " + String(ESP.getVcc());
+	PostData += "    }";
+	PostData += "  }";
+	PostData += "}";
+
+	client.println("POST " + String(endpoint) + " HTTP/1.1");
+	client.println("Host: " + String(host));
+	client.println("User-Agent: Arduino/1.0");
+	client.println("Content-Type: application/x-www-form-urlencoded");
+	client.println("Connection: close");
+	client.print("Content-Length: ");
+	client.println(PostData.length());
+	client.println();
+	client.println(PostData);
+	delay(100);
+
+	// Read all the lines of the reply from server and print them to Serial
+	while(client.available()){
+		String line = client.readStringUntil('\r');
+		Serial.print("   ");
+		Serial.print(line);
+	}
+
+	Serial.println();
+	Serial.println("-- closing connection");
+	Serial.println();
 	Serial.println();
 	
-	// Reset counter and timer
+	/***********************************************************************************************
+	 **  Reset counter and timer
+	 ***********************************************************************************************/
 	interruptCount = 0;
 	logTimeLast = millis();
 	interrupts();
